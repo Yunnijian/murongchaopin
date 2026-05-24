@@ -149,10 +149,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          CLANG="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -type f -name clang | head -n 1)"
+          CLANG="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" \( -type f -o -type l \) -name clang | head -n 1)"
           if [[ -z "$CLANG" ]]; then
             echo "clang not found under $ANDROID_NDK_HOME" >&2
-            find "$ANDROID_NDK_HOME" -maxdepth 5 \( -type f -o -type l \) | sort >&2 || true
+            find "$ANDROID_NDK_HOME" -maxdepth 7 \( -type f -o -type l \) | sort >&2 || true
             exit 1
           fi
 
