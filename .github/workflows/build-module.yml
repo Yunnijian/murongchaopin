@@ -30,7 +30,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     env:
       NDK_VERSION: r27d
       API_LEVEL: "29"
@@ -141,6 +141,33 @@ jobs:
           ndk-version: ${{ env.NDK_VERSION }}
           add-to-path: false
           local-cache: true
+
+      - name: Prepare NDK host runtime
+        shell: bash
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          set -euo pipefail
+
+          CLANG_BIN="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" \( -type f -o -type l \) -name clang | head -n 1)"
+          if [[ -z "$CLANG_BIN" ]]; then
+            echo "clang not found under $ANDROID_NDK_HOME" >&2
+            exit 1
+          fi
+
+          echo "Checking runtime dependencies for: $CLANG_BIN"
+          LDD_OUTPUT="$(ldd "$CLANG_BIN" || true)"
+          echo "$LDD_OUTPUT"
+
+          if grep -q 'libtinfo.so.5 => not found' <<<"$LDD_OUTPUT"; then
+            sudo ln -sf /usr/lib/x86_64-linux-gnu/libtinfo.so.6 /usr/lib/x86_64-linux-gnu/libtinfo.so.5
+          fi
+
+          if grep -q 'libncurses.so.5 => not found' <<<"$LDD_OUTPUT"; then
+            sudo ln -sf /usr/lib/x86_64-linux-gnu/libncurses.so.6 /usr/lib/x86_64-linux-gnu/libncurses.so.5
+          fi
+
+          "$CLANG_BIN" --version
 
       - name: Build native binaries
         shell: bash
