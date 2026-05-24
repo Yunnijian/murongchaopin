@@ -30,9 +30,9 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     env:
-      NDK_VERSION: r27d
+      NDK_PACKAGE: "27.3.13750724"
       API_LEVEL: "29"
       ZIP_NAME: OnePlus.Realme.dtbo.zip
 
@@ -134,68 +134,37 @@ jobs:
           )
           PY
 
-      - name: Setup Android NDK
-        id: setup-ndk
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: ${{ env.NDK_VERSION }}
-          add-to-path: false
-          local-cache: true
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Prepare NDK host runtime
+      - name: Install Android NDK
         shell: bash
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
           set -euo pipefail
-
-          CLANG_BIN="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" \( -type f -o -type l \) -name clang | head -n 1)"
-          if [[ -z "$CLANG_BIN" ]]; then
-            echo "clang not found under $ANDROID_NDK_HOME" >&2
-            exit 1
-          fi
-
-          echo "Checking runtime dependencies for: $CLANG_BIN"
-          LDD_OUTPUT="$(ldd "$CLANG_BIN" || true)"
-          echo "$LDD_OUTPUT"
-
-          if grep -q 'libtinfo.so.5 => not found' <<<"$LDD_OUTPUT"; then
-            sudo ln -sf /usr/lib/x86_64-linux-gnu/libtinfo.so.6 /usr/lib/x86_64-linux-gnu/libtinfo.so.5
-          fi
-
-          if grep -q 'libncurses.so.5 => not found' <<<"$LDD_OUTPUT"; then
-            sudo ln -sf /usr/lib/x86_64-linux-gnu/libncurses.so.6 /usr/lib/x86_64-linux-gnu/libncurses.so.5
-          fi
-
-          "$CLANG_BIN" --version
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install "ndk;${NDK_PACKAGE}"
 
       - name: Build native binaries
         shell: bash
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
           set -euo pipefail
 
-          CLANG="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" \( -type f -o -type l \) -name clang | head -n 1)"
-          if [[ -z "$CLANG" ]]; then
-            echo "clang not found under $ANDROID_NDK_HOME" >&2
-            find "$ANDROID_NDK_HOME" -maxdepth 7 \( -type f -o -type l \) | sort >&2 || true
-            exit 1
-          fi
-
-          TOOLCHAIN="$(cd "$(dirname "$CLANG")/.." && pwd)"
+          ANDROID_NDK_HOME="${ANDROID_SDK_ROOT}/ndk/${NDK_PACKAGE}"
+          TOOLCHAIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64"
           SYSROOT="$TOOLCHAIN/sysroot"
+          TARGET="aarch64-linux-android${API_LEVEL}"
+          CLANG="$TOOLCHAIN/bin/${TARGET}-clang"
           OUT_DIR="build/bin"
 
           echo "Using NDK from: $ANDROID_NDK_HOME"
           echo "Using clang: $CLANG"
+          "$CLANG" --version
 
           mkdir -p "$OUT_DIR"
 
           for source in process_dts dts_tool pack_dtbo unpack_dtbo rate_daemon; do
             echo "Building $source"
             "$CLANG" \
-              --target="aarch64-linux-android${API_LEVEL}" \
               --sysroot="$SYSROOT" \
               -Wall \
               -O3 \
