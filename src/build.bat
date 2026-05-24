@@ -1,5 +1,5 @@
 @echo off
-set NDK_ROOT=D:\android-ndk-r27c
+set NDK_ROOT=C:\android-ndk-r27d-windows\android-ndk-r27d
 set CLANG="%NDK_ROOT%\toolchains\llvm\prebuilt\windows-x86_64\bin\clang.exe"
 set FLAGS=--target=aarch64-linux-android29 --sysroot="%NDK_ROOT%\toolchains\llvm\prebuilt\windows-x86_64\sysroot" -Wall -O3 -fPIE -pie -lc -lm
 

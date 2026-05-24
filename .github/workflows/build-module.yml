@@ -1,0 +1,312 @@
+name: Build Module Package
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "module.prop 中的新版本号，例如 2.3"
+        required: true
+        type: string
+      version_code:
+        description: "module.prop 中的新 versionCode，例如 23"
+        required: true
+        type: string
+      release_tag:
+        description: "Release 标签，留空则自动使用 v<version>"
+        required: false
+        type: string
+      release_name:
+        description: "Release 标题，留空则自动使用标签名"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: r27d
+      API_LEVEL: "29"
+      ZIP_NAME: OnePlus.Realme.dtbo.zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release metadata
+        id: release_meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            version="${{ github.event.inputs.version }}"
+            version_code="${{ github.event.inputs.version_code }}"
+            release_tag="${{ github.event.inputs.release_tag }}"
+            release_name="${{ github.event.inputs.release_name }}"
+
+            if [[ -z "$release_tag" ]]; then
+              release_tag="v${version}"
+            fi
+
+            if [[ -z "$release_name" ]]; then
+              release_name="$release_tag"
+            fi
+
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+            echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+            echo "release_name=$release_name" >> "$GITHUB_OUTPUT"
+            echo "target_branch=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            version="$(grep '^version=' module.prop | cut -d'=' -f2-)"
+            version_code="$(grep '^versionCode=' module.prop | cut -d'=' -f2-)"
+
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+            echo "release_tag=" >> "$GITHUB_OUTPUT"
+            echo "release_name=" >> "$GITHUB_OUTPUT"
+            echo "target_branch=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update version files
+        if: steps.release_meta.outputs.is_release == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.release_meta.outputs.version }}
+          VERSION_CODE: ${{ steps.release_meta.outputs.version_code }}
+          RELEASE_TAG: ${{ steps.release_meta.outputs.release_tag }}
+          TARGET_BRANCH: ${{ steps.release_meta.outputs.target_branch }}
+          REPOSITORY: ${{ github.repository }}
+          ZIP_NAME: ${{ env.ZIP_NAME }}
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          version_code = os.environ["VERSION_CODE"]
+          release_tag = os.environ["RELEASE_TAG"]
+          target_branch = os.environ["TARGET_BRANCH"]
+          repository = os.environ["REPOSITORY"]
+          zip_name = os.environ["ZIP_NAME"]
+
+          module_prop = Path("module.prop")
+          lines = module_prop.read_text(encoding="utf-8").splitlines()
+          updated_lines = []
+          update_json_url = f"https://raw.githubusercontent.com/{repository}/{target_branch}/update.json"
+
+          for line in lines:
+            if line.startswith("version="):
+              updated_lines.append(f"version={version}")
+            elif line.startswith("versionCode="):
+              updated_lines.append(f"versionCode={version_code}")
+            elif line.startswith("updateJson="):
+              updated_lines.append(f"updateJson={update_json_url}")
+            else:
+              updated_lines.append(line)
+
+          module_prop.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
+
+          update_json_path = Path("update.json")
+          data = json.loads(update_json_path.read_text(encoding="utf-8"))
+          data["version"] = version
+          data["versionCode"] = int(version_code)
+          data["zipUrl"] = f"https://github.com/{repository}/releases/download/{release_tag}/{zip_name}"
+          data["changelog"] = f"https://raw.githubusercontent.com/{repository}/{target_branch}/changelog.md"
+          update_json_path.write_text(
+              json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Setup Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}
+          add-to-path: false
+          local-cache: true
+
+      - name: Build native binaries
+        shell: bash
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          set -euo pipefail
+
+          TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
+          CLANG="$TOOLCHAIN/bin/clang"
+          SYSROOT="$TOOLCHAIN/sysroot"
+          OUT_DIR="build/bin"
+
+          mkdir -p "$OUT_DIR"
+
+          for source in process_dts dts_tool pack_dtbo unpack_dtbo rate_daemon; do
+            echo "Building $source"
+            "$CLANG" \
+              --target="aarch64-linux-android${API_LEVEL}" \
+              --sysroot="$SYSROOT" \
+              -Wall \
+              -O3 \
+              -fPIE \
+              -pie \
+              -lc \
+              -lm \
+              -o "$OUT_DIR/$source" \
+              "src/$source.c"
+          done
+
+      - name: Read module metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          module_id="$(grep '^id=' module.prop | cut -d'=' -f2-)"
+          version="$(grep '^version=' module.prop | cut -d'=' -f2-)"
+          version_code="$(grep '^versionCode=' module.prop | cut -d'=' -f2-)"
+
+          echo "module_id=$module_id" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=${module_id}-v${version}-${version_code}" >> "$GITHUB_OUTPUT"
+          echo "release_body_tag=${{ steps.release_meta.outputs.release_tag }}" >> "$GITHUB_OUTPUT"
+
+      - name: Assemble module package
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          STAGE_DIR="build/package"
+          ZIP_PATH="build/${ZIP_NAME}"
+          CHECKSUM_PATH="${ZIP_PATH}.sha256"
+
+          rm -rf "$STAGE_DIR"
+          mkdir -p "$STAGE_DIR"
+
+          required_paths=(
+            "bin"
+            "config"
+            "META-INF"
+            "scripts"
+            "webroot"
+            "action.sh"
+            "customize.sh"
+            "module.prop"
+            "KsuWebUI.apk"
+            "service.sh"
+            "uninstall.sh"
+          )
+
+          for path in "${required_paths[@]}"; do
+            if [ ! -e "$path" ]; then
+              echo "Missing required path: $path" >&2
+              exit 1
+            fi
+            cp -a "$path" "$STAGE_DIR/"
+          done
+
+          mkdir -p "$STAGE_DIR/img"
+          if [ -d "img" ]; then
+            cp -a img/. "$STAGE_DIR/img/"
+          fi
+
+          install -m 0755 build/bin/process_dts "$STAGE_DIR/bin/process_dts"
+          install -m 0755 build/bin/dts_tool "$STAGE_DIR/bin/dts_tool"
+          install -m 0755 build/bin/pack_dtbo "$STAGE_DIR/bin/pack_dtbo"
+          install -m 0755 build/bin/unpack_dtbo "$STAGE_DIR/bin/unpack_dtbo"
+          install -m 0755 build/bin/rate_daemon "$STAGE_DIR/bin/rate_daemon"
+
+          chmod 0755 \
+            "$STAGE_DIR/action.sh" \
+            "$STAGE_DIR/customize.sh" \
+            "$STAGE_DIR/service.sh" \
+            "$STAGE_DIR/uninstall.sh" \
+            "$STAGE_DIR/scripts/web_handler.sh"
+
+          for path in bin config img META-INF scripts webroot action.sh customize.sh module.prop KsuWebUI.apk service.sh uninstall.sh; do
+            if [ ! -e "$STAGE_DIR/$path" ]; then
+              echo "Packaged path missing: $path" >&2
+              exit 1
+            fi
+          done
+
+          rm -f "$ZIP_PATH" "$CHECKSUM_PATH"
+          (
+            cd "$STAGE_DIR"
+            zip -rq "../${ZIP_NAME}" .
+          )
+
+          sha256sum "$ZIP_PATH" > "$CHECKSUM_PATH"
+
+          echo "zip_path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
+          echo "checksum_path=$CHECKSUM_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: |
+            ${{ steps.package.outputs.zip_path }}
+            ${{ steps.package.outputs.checksum_path }}
+          if-no-files-found: error
+
+      - name: Commit version changes
+        if: steps.release_meta.outputs.is_release == 'true'
+        shell: bash
+        env:
+          TARGET_BRANCH: ${{ steps.release_meta.outputs.target_branch }}
+          RELEASE_TAG: ${{ steps.release_meta.outputs.release_tag }}
+          VERSION: ${{ steps.release_meta.outputs.version }}
+          VERSION_CODE: ${{ steps.release_meta.outputs.version_code }}
+        run: |
+          set -euo pipefail
+
+          if git ls-remote --tags origin "refs/tags/${RELEASE_TAG}" | grep -q .; then
+            echo "Tag already exists: ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add module.prop update.json
+
+          if git diff --cached --quiet; then
+            echo "No version file changes detected." >&2
+            exit 1
+          fi
+
+          git commit -m "release: v${VERSION} (${VERSION_CODE})"
+          git push origin "HEAD:${TARGET_BRANCH}"
+
+          git tag -a "${RELEASE_TAG}" -m "Release ${RELEASE_TAG}"
+          git push origin "${RELEASE_TAG}"
+
+      - name: Publish GitHub release
+        if: steps.release_meta.outputs.is_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_meta.outputs.release_tag }}
+          name: ${{ steps.release_meta.outputs.release_name }}
+          target_commitish: ${{ steps.release_meta.outputs.target_branch }}
+          generate_release_notes: true
+          files: |
+            ${{ steps.package.outputs.zip_path }}
+            ${{ steps.package.outputs.checksum_path }}
