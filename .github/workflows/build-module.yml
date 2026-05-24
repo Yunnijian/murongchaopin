@@ -149,10 +149,19 @@ jobs:
         run: |
           set -euo pipefail
 
-          TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
-          CLANG="$TOOLCHAIN/bin/clang"
+          CLANG="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -type f -name clang | head -n 1)"
+          if [[ -z "$CLANG" ]]; then
+            echo "clang not found under $ANDROID_NDK_HOME" >&2
+            find "$ANDROID_NDK_HOME" -maxdepth 5 \( -type f -o -type l \) | sort >&2 || true
+            exit 1
+          fi
+
+          TOOLCHAIN="$(cd "$(dirname "$CLANG")/.." && pwd)"
           SYSROOT="$TOOLCHAIN/sysroot"
           OUT_DIR="build/bin"
+
+          echo "Using NDK from: $ANDROID_NDK_HOME"
+          echo "Using clang: $CLANG"
 
           mkdir -p "$OUT_DIR"
 
