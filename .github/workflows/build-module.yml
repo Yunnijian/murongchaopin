@@ -16,14 +16,6 @@ on:
         description: "module.prop 中的新 versionCode，例如 23"
         required: true
         type: string
-      release_tag:
-        description: "Release 标签，留空则自动使用 v<version>"
-        required: false
-        type: string
-      release_name:
-        description: "Release 标题，留空则自动使用标签名"
-        required: false
-        type: string
 
 permissions:
   contents: write
@@ -32,6 +24,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
+      RELEASE_TAG: OnePlus&Realme修改dtbo模块
+      RELEASE_NAME: OnePlus & Realme修改dtbo模块
       NDK_PACKAGE: "27.3.13750724"
       API_LEVEL: "29"
       ZIP_NAME: OnePlus.Realme.dtbo.zip
@@ -51,16 +45,8 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             version="${{ github.event.inputs.version }}"
             version_code="${{ github.event.inputs.version_code }}"
-            release_tag="${{ github.event.inputs.release_tag }}"
-            release_name="${{ github.event.inputs.release_name }}"
-
-            if [[ -z "$release_tag" ]]; then
-              release_tag="v${version}"
-            fi
-
-            if [[ -z "$release_name" ]]; then
-              release_name="$release_tag"
-            fi
+            release_tag="${RELEASE_TAG}"
+            release_name="${RELEASE_NAME}"
 
             echo "is_release=true" >> "$GITHUB_OUTPUT"
             echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -277,6 +263,7 @@ jobs:
         shell: bash
         env:
           TARGET_BRANCH: ${{ steps.release_meta.outputs.target_branch }}
+          RELEASE_TAG: ${{ steps.release_meta.outputs.release_tag }}
           VERSION: ${{ steps.release_meta.outputs.version }}
           VERSION_CODE: ${{ steps.release_meta.outputs.version_code }}
         run: |
@@ -311,4 +298,5 @@ jobs:
           makeLatest: true
           name: ${{ steps.release_meta.outputs.release_name }}
           replacesArtifacts: true
+          removeArtifacts: true
           tag: ${{ steps.release_meta.outputs.release_tag }}
