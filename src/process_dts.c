@@ -668,7 +668,7 @@ void process_file(const char *filename) {
     // Track generated nodes in this session to prevent duplicates
     int generated_wqhd_123 = 0;
     int generated_wqhd_high[7] = {0}; // 150, 155, 160, 165, 170, 175, 180
-    int generated_fhd_high[7] = {0};  // 170-199 (OnePlus 15)
+    int generated_fhd_high[4] = {0};  // 170-185 (OnePlus 15) // <-- 修改：大小从 7 降为 4，范围更新为 170-185
 
     while ((p = strstr(cursor, "timing@"))) {
         // Write everything before this block
@@ -924,14 +924,16 @@ void process_file(const char *filename) {
                 fputs(new_block, out);
                 fputs("\n", out);
             }
-            // 2. 165Hz -> Generate 170-199Hz
+            // 2. 165Hz -> Generate 170-185Hz (修改：原为 170-199Hz)
             else if (strstr(node_name, "timing@sdc_fhd_165")) {
                 fputs(current_block, out);
                 fputs("\n", out);
                 
-                int freqs[] = {170, 175, 180, 185, 190, 195, 199};
+                // 修改：频率数组截断至 185Hz
+                int freqs[] = {170, 175, 180, 185};
+                int num_freqs = sizeof(freqs) / sizeof(freqs[0]); // 自动计算数量
                 
-                for (int i=0; i<7; i++) {
+                for (int i = 0; i < num_freqs; i++) {
                     int target_fps = freqs[i];
                     char target_node_name[64];
                     sprintf(target_node_name, "timing@sdc_fhd_%d", target_fps);
