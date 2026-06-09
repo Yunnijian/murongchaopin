@@ -29,6 +29,11 @@
    - 点击模块卡片上的“操作”或“WebUI”按钮（取决于管理器版本）。
    - 在弹出的 Web 界面中进行刷新率管理、ADFR 设置或恢复操作。
 
+## 构建说明
+- 本地重新编译 `process_dts`、`dts_tool`、`pack_dtbo`、`unpack_dtbo`、`rate_daemon` 时，建议优先使用 `NDK 30.0.14904198` 或兼容的 `r30` 系版本。
+- `src/build.bat` 与 `build_daemon.bat` 现在会优先检测 `%ANDROID_NDK_ROOT%`、`%NDK_ROOT%`，再检测本机常见的 `r30-beta1 / r30` 路径，最后才回退旧路径。
+- GitHub Actions 工作流也已经统一到 `NDK 30.0.14904198`，会在 Ubuntu Runner 上重新编译这些原生二进制并组装最终模块包。
+
 ## 注意事项
 - **风险提示**：修改屏幕刷新率和系统底层参数存在一定风险，可能导致屏幕显示异常、耗电增加或系统不稳定。请务必在操作前备份重要数据。
 - **黑屏处理**：如果应用新的刷新率后出现黑屏，请尝试强制重启手机。如果问题依旧，请进入安全模式或通过 TWRP/ADB 删除本模块 (`/data/adb/modules/murongchaopin`)。
