@@ -29,7 +29,7 @@ jobs:
     env:
       RELEASE_TAG: OnePlus&Realme修改dtbo模块
       RELEASE_NAME: OnePlus & Realme修改dtbo模块
-      NDK_PACKAGE: "27.3.13750724"
+      NDK_PACKAGE: "30.0.14904198"
       API_LEVEL: "29"
       ZIP_NAME: OnePlus.Realme.dtbo.zip
 
@@ -131,7 +131,7 @@ jobs:
         run: |
           set -euo pipefail
           yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager --install "ndk;${NDK_PACKAGE}"
+          sdkmanager --channel=1 --install "ndk;${NDK_PACKAGE}"
 
       - name: Build native binaries
         shell: bash
