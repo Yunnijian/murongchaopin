@@ -34,6 +34,7 @@
 #define MODEL_RMX5200 1 // Realme GT8 Pro
 #define MODEL_PLK110  2 // OnePlus 15 (PLK110)
 #define MODEL_PJD110  3 // OnePlus 12 (PJD110)
+#define MODEL_PLQ110  4 // OnePlus Ace6 (PLQ110)
 
 int g_current_model = MODEL_UNKNOWN;
 unsigned long long g_target_project_id = 0;
@@ -54,6 +55,9 @@ void detect_device_model() {
     } else if (strstr(model, "PJD110")) {
         g_current_model = MODEL_PJD110;
         printf("Identified as OnePlus 12 (PJD110)\n");
+    } else if (strstr(model, "PLQ110")) {
+        g_current_model = MODEL_PLQ110;
+        printf("Identified as OnePlus Ace6 (PLQ110)\n");
     } else {
         g_current_model = MODEL_UNKNOWN;
         printf("Error: Unknown Model (%s) - Aborting to prevent potential damage.\n", model);
@@ -384,9 +388,10 @@ int update_prop_val_str(char *content, const char *prop_name, const char *new_va
 #define PANEL_GT8_PRO "qcom,mdss_dsi_panel_AE084_P_3_A0033_dsc_cmd_dvt02"
 #define PANEL_ONEPLUS_15 "qcom,mdss_dsi_panel_AD296_P_3_A0020_dsc_cmd"
 #define PANEL_ONEPLUS_12 "qcom,mdss_dsi_panel_AA545_P_3_A0005_dsc_cmd"
+#define PANEL_ONEPLUS_ACE6 "qcom,mdss_dsi_panel_AA605_P_7_A0020_dsc_cmd"
 
 // Check if current position is inside a target panel node and return ID
-// 0: None, 1: GT8 Pro, 2: OnePlus 15, 3: OnePlus 12
+// 0: None, 1: GT8 Pro, 2: OnePlus 15, 3: OnePlus 12, 4: OnePlus Ace6
 // Optional: out_panel_start returns the position of the panel's opening brace
 int get_panel_id(const char *file_start, const char *current_pos, const char **out_panel_start) {
     // Search backwards for the last opened brace that hasn't been closed
@@ -443,6 +448,15 @@ int get_panel_id(const char *file_start, const char *current_pos, const char **o
                      if (g_current_model == MODEL_PJD110) {
                          printf("Match Found: OnePlus 12 Panel (%s)\n", node_name);
                          return 3;
+                     }
+                     return 0;
+                }
+                
+                // OnePlus Ace6 Detection
+                if (strcmp(node_name, PANEL_ONEPLUS_ACE6) == 0) {
+                     if (g_current_model == MODEL_PLQ110) {
+                         printf("Match Found: OnePlus Ace6 Panel (%s)\n", node_name);
+                         return 4;
                      }
                      return 0;
                 }
@@ -991,6 +1005,65 @@ void process_file(const char *filename) {
             else if (strstr(node_name, "timing@sdc_fhd_90") || strstr(node_name, "timing@oplus_fhd_120")) {
                 printf("Deleting node (Skipping): %s\n", node_name);
             }
+            else {
+                fputs(current_block, out);
+            }
+        }
+        else if (panel_id == 4) {
+            // PLQ110 Logic - OnePlus Ace6
+            printf("Processing OnePlus Ace6 Node: %s\n", node_name);
+            
+            // 根据新版dts与原版dts的实际区别：
+            // 1. 只新增176Hz和185Hz节点
+            // 2. 其他所有节点完全保持不变
+            
+            // 1. 165Hz -> Generate 176Hz and 185Hz nodes
+            if (strstr(node_name, "timing@sdc_fhd_165")) {
+                // 先写入原始的165Hz节点
+                fputs(current_block, out);
+                fputs("\n", out);
+                
+                // 只新增176Hz和185Hz节点
+                int freqs[] = {176, 185};
+                int num_freqs = sizeof(freqs) / sizeof(freqs[0]);
+                
+                for (int i = 0; i < num_freqs; i++) {
+                    int target_fps = freqs[i];
+                    char target_node_name[64];
+                    sprintf(target_node_name, "timing@sdc_fhd_%d", target_fps);
+                    
+                    if (strstr(buffer, target_node_name)) {
+                         printf("Node %s already exists, skipping generation.\n", target_node_name);
+                         continue;
+                    }
+
+                    printf("Generating %dHz node for PLQ110...\n", target_fps);
+                    
+                    char new_block[MAX_BLOCK];
+                    strcpy(new_block, current_block);
+                    
+                    char header_new[128];
+                    sprintf(header_new, "timing@sdc_fhd_%d {", target_fps);
+                    replace_str(new_block, "timing@sdc_fhd_165 {", header_new);
+                    
+                    unsigned long long base_clock = get_prop_u64(current_block, "qcom,mdss-dsi-panel-clockrate");
+                    unsigned int base_fps = 165;
+                    unsigned long long new_clock = base_clock * target_fps / base_fps;
+                    unsigned int base_transfer = get_prop_u64(current_block, "qcom,mdss-mdp-transfer-time-us");
+                    unsigned int new_transfer = 0;
+                    if (base_transfer > 0) new_transfer = base_transfer * base_fps / target_fps;
+                    
+                    update_prop_u64(new_block, "qcom,mdss-dsi-panel-clockrate", new_clock);
+                    update_prop_u64(new_block, "qcom,mdss-dsi-panel-framerate", target_fps);
+                    if (new_transfer > 0) update_prop_u64(new_block, "qcom,mdss-mdp-transfer-time-us", new_transfer);
+                    
+                    fputs("\n", out);
+                    fputs(indent, out);
+                    fputs(new_block, out);
+                    fputs("\n", out);
+                }
+            }
+            // 2. 其他所有节点完全保持不变
             else {
                 fputs(current_block, out);
             }
